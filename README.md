@@ -1,125 +1,174 @@
-# 轻量电商订单系统（阶段一：Spring Boot 单体后端）
+# 轻量电商订单全栈系统
 
-商品 → 购物车 → 订单 → 库存 核心业务闭环，基于《轻量电商订单全栈系统 完整实现指南》阶段一规范实现。
-后续阶段二（Spring Cloud Alibaba 微服务）、阶段三（Vue3 管理后台）在此代码库上渐进演进。
+一个仓库覆盖「**单体 → 微服务 → 前端 → AI 智能客服**」四个部分的电商交易系统，完整实现
+**商品 → 购物车 → 订单 → 库存** 业务闭环，约 1.8 万行代码（Java 10k+ / Python 2.6k / 前端 5.5k）。
 
-## 技术栈（版本严格锁定，禁止随意升级）
+演进路径是刻意的：先在一个单体里把业务闭环和事务边界跑通（阶段一），
+再按业务域拆成微服务并补齐分布式场景下的并发与一致性（阶段二），
+最后补管理后台、小程序与 AI 智能客服（阶段三 / 拓展）。
 
-| 组件 | 版本 | 说明 |
-|---|---|---|
-| Spring Boot | 2.7.18 | 脚手架 |
-| MyBatis-Plus | 3.5.3.1 | ORM、分页、雪花主键、自动填充 |
-| MySQL / Redis | 8.0.x / 6.2.x | Docker 容器 |
-| Knife4j | 4.3.0 | 接口文档 /doc.html |
-| Hutool / Lombok | 5.8.20 / 1.18.30 | 工具集 / 样板代码消除 |
-| spring-security-crypto | 5.7.x | BCrypt 密码加密 |
-| jjwt | 0.11.5 | JWT 签发与校验 |
+## 模块导航
 
-## 快速启动
+| 模块 | 目录 | 内容 | 详细文档 |
+|---|---|---|---|
+| 阶段一 · 单体后端 | `src/` | Spring Boot 单体，商品/购物车/订单/库存完整闭环与事务边界 | [src/README.md](src/README.md) |
+| 阶段二 · 微服务 | `shop-parent/` | user / product / order 三服务 + Gateway，Nacos / OpenFeign / Sentinel | [shop-parent/README.md](shop-parent/README.md) |
+| 阶段三 · 管理后台 | `shop-web/` | Vue3 + Element Plus + Pinia，含手写 SVG 图表 | [shop-web/README.md](shop-web/README.md) |
+| 阶段三 · 小程序 | `ecommerce-mini-program/` | uni-app（Vue3），商品浏览 / 购物车 / 订单 / 智能客服 | [README](ecommerce-mini-program/README.md) |
+| 拓展 · AI 智能客服 | `ecommerce-agent-python/` | FastAPI + LangChain，RAG 混合检索 + Function Calling | [README](ecommerce-agent-python/README.md) |
 
-```bash
-# 1. 启动 MySQL(3306) + Redis(6379)，首次自动建库建表导入种子数据
-docker compose up -d
+端口约定：Gateway `8080` / user `8081` / product `8082` / order `8083` / AI 客服 `8000` /
+管理后台 `5173` / Nacos `8848` / MySQL `3306` / Redis `6379` / RabbitMQ `5672` / Redis Stack（向量库）`6380`。
 
-# 2. 启动后端（Windows 下需强制 IPv4，见下方注意事项）
-MAVEN_OPTS="-Djava.net.preferIPv4Stack=true" ./mvnw spring-boot:run
-# 或（JWT 密钥无默认值，必须显式提供，否则 fail-fast）
-# JWT_SECRET='<>=32字节的密钥>' java -jar target/helpbydsv4.jar
+## 整体架构
 
-# 3. 接口文档（Knife4j，在线调试）
-http://localhost:8080/doc.html
 ```
-
-> **已有数据卷时的升级**：`sql/schema.sql` 新增了 `user.role` 列与 `stock_compensation` 表。
-> 若沿用旧的数据卷（initdb 不会重跑），请执行一次增量脚本：
-> ```bash
-> docker exec -i ecommerce-mysql mysql -uroot -proot123456 < sql/migration_2026_09.sql
-> # 或直接重建：docker compose down -v && docker compose up -d
-> ```
-
-- 默认账号：`admin / 123456`（启动时自动创建，BCrypt 加密，**角色 ADMIN**）；自助注册的账号为普通用户 USER
-- 种子数据：12 个分类（两级树）、11 个商品（含低库存与已下架商品，供测试）
+                    ┌──────────────────┐   ┌──────────────────┐
+   Vue3 管理后台 ───▶│                  │   │  uni-app 小程序   │
+   (5173, /api 代理)│   Gateway :8080  │◀──│  (直连网关)       │
+                    │  · JWT 全局鉴权   │   └──────────────────┘
+                    │  · 身份头注入/剥离 │
+                    │  · Sentinel 限流  │────────────┐
+                    └────────┬─────────┘            │ /api/agent/**
+                             │ lb://                ▼
+              ┌──────────────┼──────────────┐  ┌─────────────────────┐
+              ▼              ▼              ▼  │ AI 客服 (FastAPI)    │
+        shop-user      shop-product    shop-order│ LangChain Agent    │
+         :8081           :8082           :8083  │ · RAG 混合检索      │
+          │                │              │    │ · 3 个 function tool│
+          │◀── OpenFeign ──┴──────────────┘    └──────┬──────────────┘
+          │       （内部令牌校验的跨服务调用）           │ 工具经网关调用电商接口
+          └────────────┬───────────────────────────────┘
+                       ▼
+        MySQL(3306) · Redis(6379) · RabbitMQ(5672) · Redis Stack(6380)
+                       ▲
+                  Nacos(8848) 注册发现
+```
 
 ## 核心设计
 
-- **统一返回**：`Result<T>`（code/message/data），code=200 成功；全局异常处理三类异常
-- **认证**：登录签发 JWT（含角色声明 ADMIN/USER）并写入 Redis（24h），`JwtAuthInterceptor` 验签 + Redis 双校验
-- **授权（重要）**：匿名白名单按「HTTP 方法 + 路径」**精确匹配**（`AuthConstant.PUBLIC_ENDPOINTS`），只放行只读接口与登录注册；商品/分类的写接口、订单管理接口均需登录，其中发货/完成/统计等管理动作要求 **ADMIN 角色**（`UserContext.requireAdmin()`，否则 403）
-- **商品缓存**：详情缓存 30 分钟 + 空值缓存 5 分钟防穿透；上下架/修改同步清缓存
-- **下单事务**（`@Transactional`）：地址校验 → 选中商品校验 → 行锁内扣库存 → 金额计算 → 雪花订单号 → 快照落库 → 清购物车；任一环节失败整体回滚
-- **防超卖**：`SELECT ... FOR UPDATE` 排他行锁（当前读，绕过 REPEATABLE READ 快照）把「判断库存 → 扣减」串行化，是并发正确性的主要保障；UPDATE 语句再带 `stock >= ? AND version = ?` 作为数据库层兜底。**行锁有效时条件更新不会因版本冲突失败，因此不再保留重试循环**（历史实现的「乐观锁重试最多 5 次」在行锁保护下永远不可达，属死代码）
-- **订单状态流转**：一律使用条件更新 `UPDATE ... WHERE id=? AND order_status=?` 并校验受影响行数，由数据库决定唯一赢家。**禁止「先查状态再无条件 updateById」**——并发双取消会重复回补库存
-- **取消回补**：仅待支付可取消，置状态与回补在同一事务内，回补失败整体回滚（订单保持待支付可重试）
-- **购物车**：同用户同商品数量累加、实时关联商品价格/状态、异常项标记；加购与改数量使用同一套库存校验口径
+**并发与一致性**
 
-## 安全说明（部署前必读）
+- **防超卖分层**：Redisson 分布式锁收敛应用层竞争 + `SELECT ... FOR UPDATE` 行锁把「判断-扣减」串行化
+  + `UPDATE ... WHERE stock >= ? AND version = ?` 数据库层兜底；行锁生效时版本冲突不可达，
+  因此删除了历史上的乐观锁重试循环
+- **订单超时取消**：RabbitMQ「TTL + 死信队列」实现延迟消息（不依赖插件），失败进归档队列由定时任务重试
+- **跨服务补偿**：库存回补失败落 `stock_compensation` 补偿表（唯一键幂等 + `REQUIRES_NEW` 独立事务），
+  由调度任务重试，保证最终一致性
+- **状态流转幂等**：订单状态一律条件更新 `WHERE id=? AND order_status=?` 并校验受影响行数，
+  禁止「先查状态再无条件更新」（并发双取消会重复回补库存）
 
-| 项 | 说明 |
-|---|---|
-| 匿名白名单 | 见 `AuthConstant.PUBLIC_ENDPOINTS`。**禁止使用 `/api/xxx/**` 这类宽通配**——曾因此把商品改价/改库存/删除与库存扣减接口全部放行。有单测 `AuthConstantTest` 兜底防回归 |
-| 密钥 | JWT / 内部令牌 / MySQL 全部通过环境变量注入（见下表）。**仓库不提供可用默认值**——JWT 缺失即启动失败，内部令牌在 `prod` 下缺失即启动失败；本地由 `start-all.sh` 注入带 `change-me` 标记的开发值 |
-| 跨域 | 仅允许 `CORS_ALLOWED_ORIGINS` 中列出的来源，且不启用凭据模式（前端用 Bearer Token） |
-| 接口文档 | `/doc.html` 等允许匿名访问，生产请通过网关或反向代理限制来源 |
+**鉴权与安全边界**
 
-### 环境变量
+- **匿名白名单按「HTTP 方法 + 路径」精确匹配**，禁止 `/api/xxx/**` 宽通配（曾因此放行商品写接口与库存接口），
+  有单测防回归；端点分三类：匿名 / **可选鉴权**（游客可用、带 token 必须有效）/ 必须登录
+- **网关剥离客户端伪造的 `X-User-Id` / `X-User-Role` / `X-Internal-Token`** 后注入认定值，
+  并拒绝含路径穿越段的请求（`/api/product/../internal/...` 曾可绕过前缀检查直达内部接口）
+- **内部接口隔离**：服务间接口一律 `/api/internal/` 前缀，网关不路由（404）；业务服务再校验
+  `X-Internal-Token`，阻断绕过网关的直连请求
+- **密钥 fail-fast**：JWT 密钥与内部令牌**都不提供仓库默认值**，缺失或长度不足直接拒绝启动
+  （HS256 对称签名，密钥公开等于任何人可自签 token 冒充任意用户，网关验签拦不住）
 
-| 变量 | 默认值（仅开发） | 用途 |
+**AI 智能客服**
+
+- **RAG 混合检索**：BM25（关键词路）+ 向量 KNN（语义路）→ **RRF 融合**（`Σ weight/(k+rank)`，
+  只用排名不用分数——余弦相似度与 BM25 量纲不可比）；中文用自建 bigram 切分
+  （RediSearch 默认分词会把连续中文切成一个超长 token，BM25 命中不了）
+- **Function Calling**：订单查询 / 商品库存 / 售后政策 3 个工具，经网关调用 Java 后端；
+  身份由网关注入、工具的电商鉴权靠请求体 `ecom_token` 透传
+- **可靠性**：RAG 失败静默降级、工具内部 catch-all、最外层兜底话术，保证任何异常下接口仍有回复
+
+## 快速开始
+
+```bash
+# 一键启动：中间件容器 → 数据库迁移 → Nacos → 4 个微服务 → AI 客服 → 管理后台
+# 脚本逐步健康检查，缺什么会明确提示；密钥与内部令牌由脚本注入本地开发值
+bash start-all.sh
+
+# 停止（--with-docker 连容器一起停）
+bash stop-all.sh --with-docker
+```
+
+启动后：
+
+| 入口 | 地址 | 账号 |
 |---|---|---|
-| `JWT_SECRET` | **无（缺失即启动失败）** | JWT HS256 密钥，≥32 字节；本地由 `start-all.sh` 注入开发值 |
-| `INTERNAL_TOKEN` | **无（缺失即启动失败）** | 服务间调用令牌 `X-Internal-Token`，阻断绕过网关的直连请求；本地由 `start-all.sh` 注入开发值 |
-| `MYSQL_HOST/PORT/DB/USER/PASSWORD` | `localhost/3306/ecommerce/root/root123456` | 数据库连接 |
-| `REDIS_HOST/PORT` | `localhost/6379` | Redis 连接 |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,...` | 允许的前端来源（逗号分隔） |
+| 管理后台 | http://localhost:5173 | `admin / 123456`（ADMIN） |
+| 接口文档（网关） | http://localhost:8080/doc.html | — |
+| AI 客服文档 | http://localhost:8000/docs | — |
+
+> 只起单体（阶段一）时端口与网关冲突，需先 `bash stop-all.sh`，
+> 并按 [src/README.md](src/README.md) 显式提供 `JWT_SECRET`。
+
+## 质量与验证
+
+自动化验证覆盖四层，脚本都在仓库里，可复现：
+
+| 套件 | 脚本 | 覆盖 |
+|---|---|---|
+| 单元测试 | `mvn test` | 白名单匹配规则（含越权与路径穿越防回归）、内部令牌守卫 |
+| 微服务冒烟 | `shop-parent/scripts/smoke-test-ms.sh` | 注册→登录→地址→加购→下单→支付→发货→完成→取消→异常场景→鉴权边界→业务服务端口防护 |
+| 并发压测 | `shop-parent/scripts/concurrency-test-ms.sh` | 20 并发×库存 5 → 恰好 5 单成功、库存 0、零超卖 |
+| AI 客服全链路 | `ecommerce-agent-python/scripts/smoke_test.sh` | 健康检查→鉴权边界→会话→对话→文档上传→向量化→RAG 检索→工具调用→清理 |
+| 浏览器端到端 | `shop-web/e2e-check.js` | CDP 驱动真实浏览器跑完整下单闭环与智能客服提问 |
+| 检索链路诊断 | `ecommerce-agent-python/scripts/diag_retrieval.py` | 打印「切词 / 关键词路 / 向量路 / 融合结果」，定位召回问题 |
+
+最近一次全量回归（2026-09-17，真实中间件环境）全部通过：
+微服务冒烟 54 项、AI 客服 21 项、浏览器端到端 21 项、单元测试 18 项，
+并发压测 20×5 零超卖。
 
 ## 目录结构
 
 ```
-├── docker-compose.yml          # MySQL8 + Redis6.2
-├── sql/                        # schema.sql(7表+索引) / data.sql(种子)
-├── scripts/                    # smoke-test.sh 全链路 / concurrency-test.sh 并发
-├── src/main/java/com/ecommerce/
-│   ├── common/                 # result / exception / enums / config / constant / util / interceptor
-│   ├── controller/ service/ mapper/ entity/ dto/ vo/
-└── pom.xml + mvnw              # Maven Wrapper 自包含构建
+├── src/                         # 阶段一：Spring Boot 单体
+├── shop-parent/                 # 阶段二：微服务（gateway / user / product / order / common）
+├── shop-web/                    # 阶段三：Vue3 管理后台（含 e2e-check.js）
+├── ecommerce-mini-program/      # 阶段三：uni-app 小程序
+├── ecommerce-agent-python/      # 拓展：AI 智能客服（FastAPI + LangChain）
+├── sql/                         # 建表 / 种子数据 / 增量迁移
+├── scripts/                     # 冒烟与并发测试脚本
+├── start-all.sh / stop-all.sh   # 一键启停本地演示环境
+└── 本地运行指南.md               # 完整运行与排障说明
 ```
 
-## 测试与验收结果
+## 环境变量
 
-```bash
-# 单元测试（无需外部依赖，CI 可直接跑）
-MAVEN_OPTS="-Djava.net.preferIPv4Stack=true" ./mvnw test
+密钥类均**无仓库默认值**，缺失即启动失败；本地由 `start-all.sh` 注入带 `change-me` 标记的开发值。
 
-# 集成验收（需要 MySQL + Redis 已启动）
-bash scripts/smoke-test.sh      # 全链路：注册→登录→地址→加购→下单→支付→发货→完成→取消→异常场景
-bash scripts/concurrency-test.sh # 20 并发 × 库存 5 → 恰好 5 单成功、库存 0、无超卖
-```
-
-| 验收标准 | 结果 |
-|---|---|
-| 白名单匹配规则单测 | ✅ `AuthConstantTest` 9/9 通过（含越权接口防回归） |
-| Knife4j 在线调试全部核心接口 | ✅ 27 个接口 |
-| 完整下单流程跑通 | ✅ 冒烟测试全部通过（含新增的权限与越权防回归断言） |
-| 并发无超卖 | ✅ 20 并发×库存5 → 成功 5 单、库存 0 |
-| 并发双取消不重复回补 | ✅ 10 并发取消 → 仅 1 次生效、库存恰好回补 1 次 |
-| 异常事务回滚无脏数据 | ✅ 库存扣减回滚、无残留订单 |
-
-> 以上为 2026-09-11 在真实中间件环境（MySQL/Redis/RabbitMQ/Nacos 全部启动）重跑的结果，全绿。
-> 管理动作（发货/完成）需用 `admin` 账号登录，脚本已相应调整。
-> 详细验收记录见 `核查报告_可执行性与鲁棒性.md` 附录 G。
+| 变量 | 默认值 | 用途 |
+|---|---|---|
+| `JWT_SECRET` | **无（缺失即启动失败）** | JWT HS256 密钥，≥32 字节 |
+| `INTERNAL_TOKEN` | **无（缺失即启动失败）** | 服务间调用令牌 `X-Internal-Token` |
+| `LLM_API_KEY` | **无（AI 客服需配置）** | DeepSeek API Key，见 `ecommerce-agent-python/.env.example` |
+| `MYSQL_*` / `REDIS_*` / `RABBITMQ_*` | 本地开发值 | 中间件连接 |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,...` | 允许的前端来源（逗号分隔） |
 
 ## 注意事项（本机环境）
 
 1. **Maven 网络**：本机 Java 解析 Maven Central 偶发失败，需 `MAVEN_OPTS="-Djava.net.preferIPv4Stack=true"`
-2. **Maven Wrapper**：Git Bash 下 `./mvnw` 可能报 `找不到主类 org.codehaus.plexus.classworlds.launcher.Launcher`（wrapper 已下载完整，是 only-script 模式的路径问题）。绕法：直连 java 调启动器
+2. **Maven Wrapper**：Git Bash 下 `./mvnw` 可能报找不到 classworlds 启动器，绕法是直连 java 调启动器
    ```bash
    D=~/.m2/wrapper/dists/apache-maven-3.9.9/*/; java -classpath "$D/boot/plexus-classworlds-2.8.0.jar" \
      "-Dclassworlds.conf=$D/bin/m2.conf" "-Dmaven.home=$D" \
      -Dmaven.multiModuleProjectDirectory="$PWD" \
      org.codehaus.plexus.classworlds.launcher.Launcher -o -B package
    ```
-3. **Docker 镜像**：本机直连 Docker Hub 不通，可配置镜像 `docker.1panel.live`（`docker pull docker.1panel.live/library/xxx && docker tag`）
-4. **Git Bash 传参**：向 Windows 原生程序传中文参数会被转成 GBK，curl 请求体请写入文件后 `--data @file`（scripts 中已处理）
-5. **curl 走代理**：本机 curl 访问 localhost 可能被代理拦截返回 502，请加 `--noproxy '*'`
-6. **日志编码**：应用日志按平台编码（GBK）落盘，用 `grep` 搜中文会搜不到，需先 `iconv -f GBK -t UTF-8`
-7. **种子数据编码**：`sql/data.sql` 首行 `SET NAMES utf8mb4` 不可删除，否则容器 initdb 以 latin1 导入产生中文乱码
-8. **数据库未就绪**：应用启动时若 MySQL 不可达，`DataInitializer` 会重试约 10 秒后**继续启动**（不再让进程退出），但此时依赖数据库的接口会返回 500，请确认数据库就绪后再验证
+3. **Docker 镜像**：直连 Docker Hub 不通时可换镜像源
+4. **Git Bash 传参**：向 Windows 原生程序传中文参数会被转成 GBK，curl 请求体请写入文件后 `--data @file`
+5. **curl 走代理**：访问 localhost 可能被代理拦截返回 502，加 `--noproxy '*'`
+6. **日志编码**：应用日志按平台编码（GBK）落盘，`grep` 搜中文会搜不到
+7. **种子数据编码**：`sql/data.sql` 首行 `SET NAMES utf8mb4` 不可删除，否则 initdb 中文乱码
+8. **数据库未就绪**：应用会重试后继续启动，此时依赖库的接口返回 500，请等中间件就绪
+9. **compose 执行目录**：必须在 `shop-parent/` 下执行（根目录的 `docker-compose.yml` 是本项目早期的精简版）
+10. **Nacos 端口 9848 被占用**：Windows 的保留端口段可能覆盖 `9848`（= 8848 + 1000，Nacos 的 gRPC 端口），
+    表现为 `netstat` 看不到占用却 `bind` 失败。执行 `net stop winnat && net start winnat` 重新分配保留段即可
+
+## 已知边界
+
+诚实标注未做的部分，避免误读：
+
+- **AI 客服的 rerank 未实现**：当前是「BM25 + 向量 + RRF」，没有 cross-encoder 精排；
+  演示规模下 RRF 已解决"召回漏"的主要矛盾，精排收益要在更大候选集上才明显
+- **中文分词是自建 bigram**，非专业分词器（不处理同义词与多字词边界），小规模知识库够用
+- **向量库用 Redis Stack**：规模上来后应换 Milvus / pgvector
+- **密钥未接配置中心**：目前靠环境变量注入，生产建议托管到 Nacos / KMS 并支持轮换
