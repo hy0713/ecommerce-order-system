@@ -1,0 +1,60 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: shop-product
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:ecommerce}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:root123456}
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    database: 0
+    timeout: 5000ms
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: public
+      username: ${NACOS_USER:nacos}
+      password: ${NACOS_PASSWORD:nacos}
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.ecommerce.common.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+# 应用自定义配置（JwtUtil 为公共组件，需提供配置项）
+ecommerce:
+  jwt:
+    # 生产环境必须通过环境变量 JWT_SECRET 覆盖
+    secret: ${JWT_SECRET:}   # 不提供默认值：缺失即启动失败（fail-fast），本地由 start-all.sh 注入
+    expire-seconds: 86400
+  internal:
+    # 服务间调用令牌：未携带者视为绕过网关，直接 403。生产必须覆盖
+    token: ${INTERNAL_TOKEN:}
+
+# Redisson 分布式锁连接配置
+redisson:
+  address: redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}
+  # 锁等待 3 秒，锁超时 30 秒（防死锁）
+  lock-wait-seconds: 3
+  lock-lease-seconds: 30
+
+knife4j:
+  enable: true
+
+springdoc:
+  packages-to-scan: com.ecommerce.controller
+
+logging:
+  level:
+    com.ecommerce: info

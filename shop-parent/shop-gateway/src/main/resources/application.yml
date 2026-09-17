@@ -1,0 +1,61 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: shop-gateway
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: public
+      username: ${NACOS_USER:nacos}
+      password: ${NACOS_PASSWORD:nacos}
+    gateway:
+      routes:
+        # 用户服务：认证 + 用户 + 地址
+        - id: shop-user
+          uri: lb://shop-user
+          predicates:
+            - Path=/api/auth/**,/api/user/**
+        # 商品服务：商品 + 分类
+        - id: shop-product
+          uri: lb://shop-product
+          predicates:
+            - Path=/api/product/**,/api/category/**
+        # 订单服务：购物车 + 订单
+        - id: shop-order
+          uri: lb://shop-order
+          predicates:
+            - Path=/api/order/**,/api/cart/**
+        # AI 客服（Python FastAPI）：非 Java 服务、未注册 Nacos，用静态 URI 转发。
+        # 关键：它必须经网关才能拿到「已鉴权」的 X-User-Id —— 若前端直连 :8000，
+        # user_id 只能由调用方自报，任意用户即可读取他人会话记录。
+        # 鉴权策略见 AuthConstant：POST /api/agent/chat 可选鉴权（游客可用），
+        # /api/agent/session/** 必须登录。
+        - id: shop-agent
+          uri: ${AGENT_URI:http://localhost:8000}
+          predicates:
+            - Path=/api/agent/**
+        # 说明：刻意不为 /api/internal/** 配置路由（服务间接口不经网关），
+        # AuthGlobalFilter 也会对该前缀直接返回 404。
+      # 全局跨域（业务服务不再配置）
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            # 显式来源，避免 allowedOriginPatterns="*" + 凭据共存
+            allowedOriginPatterns: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080}
+            allowedMethods: "GET,POST,PUT,DELETE,OPTIONS"
+            allowedHeaders: "*"
+            # 前后端使用 Bearer Token（非 Cookie），无需凭据模式
+            allowCredentials: false
+            maxAge: 3600
+
+ecommerce:
+  internal:
+    # 服务间调用令牌，必须与各业务服务 ecommerce.internal.token 一致；生产必须覆盖
+    token: ${INTERNAL_TOKEN:}
+
+logging:
+  level:
+    com.ecommerce: info

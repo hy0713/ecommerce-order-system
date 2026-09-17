@@ -1,0 +1,72 @@
+// ============================================================
+// 轻电商小程序 · 设计变量（与 Web 管理后台同一套蓝白 token）
+// 说明：本文件只放「变量 / mixin」，会被 uni.scss 自动注入到每个
+//       scoped style 中，因此绝不能包含真实 CSS 规则，否则会重复打包。
+// ============================================================
+
+// 品牌色（蓝白主色）
+$brand: #2563eb;
+$brand-light: #3b82f6;
+$brand-fade: #eff6ff;
+$brand-grad: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+
+// 中性色
+$bg-page: #f5f7fa;
+$bg-card: #ffffff;
+$bg-muted: #f2f4f8;
+$border-soft: #eef0f4;
+$border-line: #f0f2f5;
+
+// 文字
+$text-1: #1f2937;
+$text-2: #6b7280;
+$text-3: #9ca3af;
+
+// 语义色
+$price: #ef4444;
+$success: #10b981;
+$warning: #f59e0b;
+$danger: #ef4444;
+
+// 圆角
+$radius-sm: 12rpx;
+$radius: 20rpx;
+$radius-lg: 28rpx;
+$radius-pill: 999rpx;
+
+// 间距
+$gap: 24rpx;
+$gap-sm: 16rpx;
+$gap-lg: 32rpx;
+
+// 阴影
+$shadow-card: 0 4rpx 20rpx rgba(17, 24, 39, 0.05);
+$shadow-float: 0 -4rpx 24rpx rgba(17, 24, 39, 0.06);
+$shadow-brand: 0 8rpx 20rpx rgba(37, 99, 235, 0.24);
+
+// 字号
+$fs-title: 32rpx;
+$fs-body: 28rpx;
+$fs-note: 24rpx;
+$fs-mini: 22rpx;
+
+// 常用 mixin
+@mixin card($padding: 24rpx) {
+  background: $bg-card;
+  border-radius: $radius;
+  box-shadow: $shadow-card;
+  padding: $padding;
+}
+
+@mixin ellipsis($lines: 1) {
+  @if $lines == 1 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  } @else {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: $lines;
+    overflow: hidden;
+  }
+}

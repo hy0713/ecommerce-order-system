@@ -1,0 +1,115 @@
+/* ============================================================
+   轻电商管理后台 · 全局设计系统
+   Modern SaaS / Clean Dashboard / Light UI / Blue & White
+   - 白 / 浅灰背景 + 蓝色主色 + 白色卡片 + 圆角 + 轻阴影
+   所有页面共用本文件的 token 与工具类，保证风格统一。
+   ============================================================ */
+
+:root {
+  /* ---- 品牌色 ---- */
+  --brand: #3b82f6;
+  --brand-600: #2563eb;
+  --brand-700: #1d4ed8;
+  --brand-50: #eff6ff;
+  --brand-100: #dbeafe;
+
+  /* ---- 中性色 ---- */
+  --bg: #f5f7fa;
+  --card: #ffffff;
+  --text: #1f2d3d;        /* 深蓝灰，主文字 */
+  --text-2: #5e6d82;      /* 次要文字 */
+  --text-3: #94a3b3;      /* 辅助 / 占位 */
+  --border: #e4e7ed;      /* 边框 */
+  --border-2: #edf1f7;    /* 更浅边框（表格分隔） */
+
+  /* ---- 语义色 ---- */
+  --success: #22c55e;
+  --success-bg: #f0fdf4;
+  --warning: #f59e0b;
+  --warning-bg: #fffbeb;
+  --danger: #ef4444;
+  --danger-bg: #fef2f2;
+  --info: #64748b;
+  --info-bg: #f1f5f9;
+
+  /* ---- 形态 ---- */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 2px rgba(31, 45, 61, 0.03), 0 4px 16px rgba(31, 45, 61, 0.05);
+  --shadow-hover: 0 8px 28px rgba(37, 99, 235, 0.12);
+
+  /* ---- 让 Element Plus 主色跟随品牌蓝 ---- */
+  --el-color-primary: #3b82f6;
+  --el-color-primary-light-3: #6aa4f8;
+  --el-color-primary-light-5: #93befa;
+  --el-color-primary-light-7: #bcd7fc;
+  --el-color-primary-light-8: #d4e4fd;
+  --el-color-primary-light-9: #ecf3fe;
+  --el-color-primary-dark-2: #2563eb;
+  --el-border-radius-base: 8px;
+}
+
+/* ---- 基础 ---- */
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, "Segoe UI", Arial, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 页面容器与页头 */
+.page { padding: 20px 24px 40px; }
+.page-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 18px; }
+.page-title { font-size: 20px; font-weight: 600; color: var(--text); margin: 0; }
+.page-desc { margin: 6px 0 0; font-size: 13px; color: var(--text-3); }
+.page-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+/* 白色卡片 */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.card-pad { padding: 18px 20px; }
+.card-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.card-sub { font-size: 12px; color: var(--text-3); }
+
+/* ---- Element Plus 覆写（圆角 / 阴影 / 浅色化）---- */
+.el-card { border-radius: var(--radius); border-color: var(--border-2); box-shadow: var(--shadow); }
+.el-card__header { border-bottom-color: var(--border-2); padding: 16px 20px; }
+.el-card__body { padding: 18px 20px; }
+
+.el-button { border-radius: var(--radius-sm); font-weight: 500; }
+.el-button--primary { box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25); }
+
+.el-table { --el-table-border-color: var(--border-2); --el-table-header-bg-color: #f8fafc; color: var(--text); }
+.el-table th.el-table__cell { background: #f8fafc; color: var(--text-2); font-weight: 600; height: 46px; }
+.el-table td.el-table__cell { color: var(--text); }
+.el-table .el-table__row:hover > td.el-table__cell { background: var(--brand-50); }
+
+.el-dialog { border-radius: var(--radius); box-shadow: var(--shadow-hover); }
+.el-dialog__header { border-bottom: 1px solid var(--border-2); margin-right: 0; padding-bottom: 14px; }
+.el-drawer__header { margin-bottom: 0; padding: 18px 20px; border-bottom: 1px solid var(--border-2); color: var(--text); font-weight: 600; }
+
+.el-input__wrapper, .el-select__wrapper { border-radius: var(--radius-sm); }
+.el-pagination { justify-content: flex-end; margin-top: 16px; }
+
+.el-tag { border-radius: 6px; font-weight: 500; }
+
+.el-message { border-radius: var(--radius-sm); box-shadow: var(--shadow-hover); }
+
+/* 状态小圆点 + 文字（用于订单状态 / 商品状态，替代花俏 Tag） */
+.dot { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.dot.c-blue { color: var(--brand); }
+.dot.c-green { color: var(--success); }
+.dot.c-orange { color: var(--warning); }
+.dot.c-red { color: var(--danger); }
+.dot.c-grey { color: var(--text-3); }
+
+/* 数字（统计卡片的大数字，等宽便于对齐） */
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }

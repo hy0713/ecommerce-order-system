@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+files/*
+!files/.gitkeep
+models/*
+!models/.gitkeep
+scripts/tmp_*.json

@@ -1,0 +1,92 @@
+// ============================================================
+// 轻电商小程序 · 全局样式（只在 App.vue 引入一次）
+// ============================================================
+@import './variables.scss';
+
+page {
+  background-color: $bg-page;
+  font-size: $fs-body;
+  color: $text-1;
+  line-height: 1.55;
+}
+
+// 通用页面容器：统一左右留白
+.app-page {
+  padding: $gap;
+}
+
+// 通用卡片
+.app-card {
+  @include card;
+}
+
+// 分组标题（左侧品牌色竖条）
+.app-title {
+  position: relative;
+  padding-left: 20rpx;
+  font-size: $fs-title;
+  font-weight: 600;
+  color: $text-1;
+  line-height: 1.4;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 8rpx;
+    height: 30rpx;
+    border-radius: 4rpx;
+    background: $brand-grad;
+  }
+}
+
+// 价格
+.app-price {
+  color: $price;
+  font-weight: 600;
+}
+
+.app-price-symbol {
+  font-size: $fs-note;
+}
+
+// 底部悬浮操作栏（带安全区）
+.app-float-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  background: $bg-card;
+  box-shadow: $shadow-float;
+  padding: 16rpx $gap calc(16rpx + env(safe-area-inset-bottom));
+}
+
+// 主按钮（品牌渐变）
+.app-btn-primary {
+  background: $brand-grad;
+  color: #fff;
+  border-radius: $radius-pill;
+  box-shadow: $shadow-brand;
+  text-align: center;
+}
+
+// 分隔留白
+.app-gap {
+  height: $gap;
+}
+
+// 加载 / 空态文本
+.app-tip {
+  text-align: center;
+  font-size: $fs-note;
+  color: $text-3;
+  padding: 24rpx 0;
+}
+
+// uView Plus 少量观感覆写：让默认组件贴合蓝白设计系统
+.u-button--primary {
+  box-shadow: $shadow-brand;
+}

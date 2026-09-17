@@ -1,0 +1,25 @@
+{
+  "name": "ecommerce-mini-program",
+  "version": "1.0.0",
+  "private": true,
+  "description": "轻量电商订单系统 C 端微信小程序（阶段四）",
+  "scripts": {
+    "dev:mp-weixin": "uni -p mp-weixin",
+    "build:mp-weixin": "uni build -p mp-weixin"
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "3.0.0-5010520260709002",
+    "@dcloudio/uni-components": "3.0.0-5010520260709002",
+    "@dcloudio/uni-h5": "3.0.0-5010520260709002",
+    "@dcloudio/uni-mp-weixin": "3.0.0-5010520260709002",
+    "pinia": "2.1.7",
+    "uview-plus": "3.8.86",
+    "vue": "3.3.13"
+  },
+  "devDependencies": {
+    "@dcloudio/types": "3.4.31",
+    "@dcloudio/vite-plugin-uni": "3.0.0-5010520260709002",
+    "sass": "1.77.8",
+    "vite": "5.2.8"
+  }
+}

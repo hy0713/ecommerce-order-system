@@ -1,0 +1,77 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: shop-order
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:ecommerce}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:root123456}
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        acknowledge-mode: auto
+        # 重试耗尽后不再回队，交由队列 DLX 归档到 order.timeout.failed.queue
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1000ms
+          multiplier: 2
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        namespace: public
+      username: ${NACOS_USER:nacos}
+      password: ${NACOS_PASSWORD:nacos}
+
+# 应用自定义配置（JwtUtil 为公共组件，需提供配置项）
+ecommerce:
+  jwt:
+    # 生产环境必须通过环境变量 JWT_SECRET 覆盖
+    secret: ${JWT_SECRET:}   # 不提供默认值：缺失即启动失败（fail-fast），本地由 start-all.sh 注入
+    expire-seconds: 86400
+  internal:
+    # 服务间调用令牌：未携带者视为绕过网关，直接 403。生产必须覆盖
+    token: ${INTERNAL_TOKEN:}
+  order:
+    # 待支付订单过期时间（分钟），默认 30；验收时调小验证自动取消
+    expire-minutes: 30
+
+# OpenFeign 超时配置
+# 注意：Spring Cloud 2021.0.x 绑定的前缀是 feign.client（不是 spring.cloud.openfeign，
+# 后者是 2022.0+ 才引入的，写在旧版本上会被静默忽略，实际回落到 Feign 默认的 10s/60s）
+feign:
+  client:
+    config:
+      default:
+        connect-timeout: 5000
+        read-timeout: 10000
+        # 刻意不配置 retryer：库存扣减/回补接口非幂等，网络超时重试会造成重复扣减或重复回补。
+        # 失败后的最终一致由「OrderServiceImpl 的失败补偿 + stock_compensation 补偿流水重试」保证。
+
+mybatis-plus:
+  type-aliases-package: com.ecommerce.common.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+knife4j:
+  enable: true
+
+springdoc:
+  packages-to-scan: com.ecommerce.controller
+
+logging:
+  level:
+    com.ecommerce: info

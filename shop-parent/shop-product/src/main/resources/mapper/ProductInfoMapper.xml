@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ecommerce.mapper.ProductInfoMapper">
+
+    <!-- 乐观锁扣减库存：WHERE 条件同时判断库存充足与版本号一致，受影响行数为 0 则扣减失败 -->
+    <update id="deductStock">
+        UPDATE product_info
+        SET stock   = stock - #{quantity},
+            version = version + 1
+        WHERE id = #{productId}
+          AND stock &gt;= #{quantity}
+          AND version = #{version}
+    </update>
+
+    <!-- 回补库存（取消订单） -->
+    <update id="restoreStock">
+        UPDATE product_info
+        SET stock   = stock + #{quantity},
+            version = version + 1
+        WHERE id = #{productId}
+    </update>
+
+    <!-- 当前读：加行锁查询，用于事务内乐观锁重试时读取最新版本号 -->
+    <select id="selectByIdForUpdate" resultType="com.ecommerce.common.entity.ProductInfo">
+        SELECT id, category_id, name, price, stock, description, icon, status, version,
+               create_time, update_time
+        FROM product_info
+        WHERE id = #{id}
+        FOR UPDATE
+    </select>
+
+</mapper>

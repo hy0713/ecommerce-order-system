@@ -1,0 +1,42 @@
+# ===== Web 框架 =====
+fastapi==0.104.1
+uvicorn[standard]==0.27.1
+# pydantic 2.5.2/2.6.x 在 Python 3.12 上触发 langsmith v1 shim 的
+# ForwardRef._evaluate() recursive_guard 缺陷（实测 2.7.4 起修复）；<3 约束仍满足
+pydantic==2.7.4
+pydantic-settings==2.1.0
+python-multipart==0.0.6
+
+# ===== 数据层 =====
+# 2.0.23 的 aiomysql 方言在 pool_pre_ping 下调用 ping() 缺 reconnect 参数（实测报错），2.0.28 修复
+SQLAlchemy==2.0.28
+aiomysql==0.2.0
+cryptography==42.0.5
+redis==5.0.1
+pika==1.3.2
+
+# ===== HTTP 客户端 =====
+httpx==0.25.2
+
+# ===== LangChain 0.1.0 生态（版本互相兼容的一组，已用 PyPI 元数据核对传递依赖）=====
+# 约束关系：langchain 0.1.0 要求 langsmith>=0.0.77,<0.1.0 与 langchain-core>=0.1.7,<0.2；
+# langchain-core 0.1.24 起要求 langsmith>=0.1.0（与 langchain 0.1.0 冲突），故 core 锁 0.1.23；
+# langsmith 锁 0.0.87（core 0.1.20-0.1.23 的精确要求 >=0.0.87,<0.0.88）。
+# 文本分块器用 langchain 0.1.0 内置的 langchain.text_splitter（不引 langchain-text-splitters，
+# 该包 0.0.1 要求 core>=0.1.28，与本组约束不相容）。
+langchain==0.1.0
+langchain-core==0.1.23
+langchain-community==0.0.9
+langsmith==0.0.87
+langchain-openai==0.0.3
+openai==1.30.5
+tiktoken==0.5.2
+numpy==1.26.4
+
+# ===== Embedding / 向量 =====
+fastembed==0.2.6
+huggingface-hub==0.20.3
+
+# ===== 文档解析 =====
+pypdf==3.17.4
+python-docx==1.1.0
