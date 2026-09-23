@@ -1,174 +1,251 @@
 # 轻量电商订单全栈系统
 
-一个仓库覆盖「**单体 → 微服务 → 前端 → AI 智能客服**」四个部分的电商交易系统，完整实现
-**商品 → 购物车 → 订单 → 库存** 业务闭环，约 1.8 万行代码（Java 10k+ / Python 2.6k / 前端 5.5k）。
+这是一个面向 2027 届 Java 后端求职展示的可运行电商项目，覆盖商品、购物车、下单、库存、订单状态、超时取消、库存回补以及 AI 客服。
 
-演进路径是刻意的：先在一个单体里把业务闭环和事务边界跑通（阶段一），
-再按业务域拆成微服务并补齐分布式场景下的并发与一致性（阶段二），
-最后补管理后台、小程序与 AI 智能客服（阶段三 / 拓展）。
+项目重点不是构建生产级电商基础设施，而是把常见业务流程、并发控制、权限边界、消息幂等和异常处理做得清楚、可靠、可以在面试中解释。
 
-## 模块导航
+GitHub：[hy0713/ecommerce-order-system](https://github.com/hy0713/ecommerce-order-system)
 
-| 模块 | 目录 | 内容 | 详细文档 |
-|---|---|---|---|
-| 阶段一 · 单体后端 | `src/` | Spring Boot 单体，商品/购物车/订单/库存完整闭环与事务边界 | [src/README.md](src/README.md) |
-| 阶段二 · 微服务 | `shop-parent/` | user / product / order 三服务 + Gateway，Nacos / OpenFeign / Sentinel | [shop-parent/README.md](shop-parent/README.md) |
-| 阶段三 · 管理后台 | `shop-web/` | Vue3 + Element Plus + Pinia，含手写 SVG 图表 | [shop-web/README.md](shop-web/README.md) |
-| 阶段三 · 小程序 | `ecommerce-mini-program/` | uni-app（Vue3），商品浏览 / 购物车 / 订单 / 智能客服 | [README](ecommerce-mini-program/README.md) |
-| 拓展 · AI 智能客服 | `ecommerce-agent-python/` | FastAPI + LangChain，RAG 混合检索 + Function Calling | [README](ecommerce-agent-python/README.md) |
+## 项目概览
 
-端口约定：Gateway `8080` / user `8081` / product `8082` / order `8083` / AI 客服 `8000` /
-管理后台 `5173` / Nacos `8848` / MySQL `3306` / Redis `6379` / RabbitMQ `5672` / Redis Stack（向量库）`6380`。
+核心业务链路：
 
-## 整体架构
-
-```
-                    ┌──────────────────┐   ┌──────────────────┐
-   Vue3 管理后台 ───▶│                  │   │  uni-app 小程序   │
-   (5173, /api 代理)│   Gateway :8080  │◀──│  (直连网关)       │
-                    │  · JWT 全局鉴权   │   └──────────────────┘
-                    │  · 身份头注入/剥离 │
-                    │  · Sentinel 限流  │────────────┐
-                    └────────┬─────────┘            │ /api/agent/**
-                             │ lb://                ▼
-              ┌──────────────┼──────────────┐  ┌─────────────────────┐
-              ▼              ▼              ▼  │ AI 客服 (FastAPI)    │
-        shop-user      shop-product    shop-order│ LangChain Agent    │
-         :8081           :8082           :8083  │ · RAG 混合检索      │
-          │                │              │    │ · 3 个 function tool│
-          │◀── OpenFeign ──┴──────────────┘    └──────┬──────────────┘
-          │       （内部令牌校验的跨服务调用）           │ 工具经网关调用电商接口
-          └────────────┬───────────────────────────────┘
-                       ▼
-        MySQL(3306) · Redis(6379) · RabbitMQ(5672) · Redis Stack(6380)
-                       ▲
-                  Nacos(8848) 注册发现
+```text
+商品浏览 → 加入购物车 → 创建订单 → 扣减库存
+                         ↓
+              支付/取消/超时取消
+                         ↓
+                    库存回补
 ```
 
-## 核心设计
+当前仓库同时保留了单体版本和微服务版本，便于展示从单体到 Spring Cloud Alibaba 的演进过程：
 
-**并发与一致性**
+| 模块 | 作用 |
+| --- | --- |
+| `shop-parent` | 当前主要运行版本：Gateway、用户、商品、订单和公共模块 |
+| `src` | 单体版本/演进对照代码 |
+| `shop-web` | Vue 3 管理后台与业务前端 |
+| `ecommerce-mini-program` | uni-app 微信小程序端 |
+| `ecommerce-agent-python` | FastAPI + RAG + Function Calling AI 客服 |
+| `sql` | 数据库初始化脚本和迁移脚本 |
 
-- **防超卖分层**：Redisson 分布式锁收敛应用层竞争 + `SELECT ... FOR UPDATE` 行锁把「判断-扣减」串行化
-  + `UPDATE ... WHERE stock >= ? AND version = ?` 数据库层兜底；行锁生效时版本冲突不可达，
-  因此删除了历史上的乐观锁重试循环
-- **订单超时取消**：RabbitMQ「TTL + 死信队列」实现延迟消息（不依赖插件），失败进归档队列由定时任务重试
-- **跨服务补偿**：库存回补失败落 `stock_compensation` 补偿表（唯一键幂等 + `REQUIRES_NEW` 独立事务），
-  由调度任务重试，保证最终一致性
-- **状态流转幂等**：订单状态一律条件更新 `WHERE id=? AND order_status=?` 并校验受影响行数，
-  禁止「先查状态再无条件更新」（并发双取消会重复回补库存）
+## 系统结构
 
-**鉴权与安全边界**
+```text
+Vue 3 管理后台 / uni-app 小程序
+              │ JWT
+              ▼
+      shop-gateway :8080
+       ├── shop-user    :8081  用户、登录、地址
+       ├── shop-product :8082  商品、分类、库存
+       └── shop-order   :8083  购物车、订单、超时处理
+              │
+       Nacos 服务发现与配置
 
-- **匿名白名单按「HTTP 方法 + 路径」精确匹配**，禁止 `/api/xxx/**` 宽通配（曾因此放行商品写接口与库存接口），
-  有单测防回归；端点分三类：匿名 / **可选鉴权**（游客可用、带 token 必须有效）/ 必须登录
-- **网关剥离客户端伪造的 `X-User-Id` / `X-User-Role` / `X-Internal-Token`** 后注入认定值，
-  并拒绝含路径穿越段的请求（`/api/product/../internal/...` 曾可绕过前缀检查直达内部接口）
-- **内部接口隔离**：服务间接口一律 `/api/internal/` 前缀，网关不路由（404）；业务服务再校验
-  `X-Internal-Token`，阻断绕过网关的直连请求
-- **密钥 fail-fast**：JWT 密钥与内部令牌**都不提供仓库默认值**，缺失或长度不足直接拒绝启动
-  （HS256 对称签名，密钥公开等于任何人可自签 token 冒充任意用户，网关验签拦不住）
+MySQL ─ Redis ─ RabbitMQ(TTL + DLX)
 
-**AI 智能客服**
+AI 客服：FastAPI :8000
+         通过 Gateway 访问业务接口和订单/商品查询能力
+```
 
-- **RAG 混合检索**：BM25（关键词路）+ 向量 KNN（语义路）→ **RRF 融合**（`Σ weight/(k+rank)`，
-  只用排名不用分数——余弦相似度与 BM25 量纲不可比）；中文用自建 bigram 切分
-  （RediSearch 默认分词会把连续中文切成一个超长 token，BM25 命中不了）
-- **Function Calling**：订单查询 / 商品库存 / 售后政策 3 个工具，经网关调用 Java 后端；
-  身份由网关注入、工具的电商鉴权靠请求体 `ecom_token` 透传
-- **可靠性**：RAG 失败静默降级、工具内部 catch-all、最外层兜底话术，保证任何异常下接口仍有回复
+## 技术栈
 
-## 快速开始
+| 层次 | 技术 |
+| --- | --- |
+| 后端 | Java 17、Spring Boot 2.7.18、Spring Cloud 2021.0.8、Spring Cloud Alibaba 2021.0.5.0 |
+| 微服务 | Spring Cloud Gateway、OpenFeign、LoadBalancer、Nacos、Sentinel |
+| 数据访问 | MyBatis-Plus、MySQL 8、Redis 6、Redisson |
+| 消息 | RabbitMQ 3.x、TTL、死信交换机、消费幂等、有限重试 |
+| 前端 | Vue 3、Vite、Pinia、Element Plus、Axios |
+| 小程序 | uni-app、Vue 3、Pinia、uView Plus |
+| AI | FastAPI、SQLAlchemy Async、LangChain、DeepSeek OpenAI 兼容接口、fastembed |
+
+## 值得关注的实现
+
+### 库存与并发
+
+- 库存操作使用 Redisson 分布式锁保护同一商品的并发入口。
+- 数据库扣减在事务内完成，通过行锁/条件更新和更新结果判断避免常见并发下的负库存与超卖。
+- 下单涉及远程库存扣减和本地订单落库时，本地落库失败会记录库存补偿，补偿任务使用独立事务和行级抢占，避免重复回补。
+- 这套设计解决的是项目范围内的常见并发与重复请求问题，不宣称金融级 Exactly Once。
+
+### 订单状态与超时取消
+
+- 订单状态转换使用条件更新，避免已支付订单被超时任务错误取消。
+- 超时取消采用 RabbitMQ TTL + DLX，并保留定时扫描作为兜底。
+- 重复到达的超时消息会先检查订单当前状态；已处理订单不会再次扣减或回补库存。
+
+### 权限与服务边界
+
+- Gateway 校验 JWT，并根据路由和方法做访问控制。
+- 用户服务、订单服务等关键查询会校验资源归属，用户不能通过修改订单 ID 查询他人订单。
+- 服务间调用使用内部令牌；客户端不能直接伪造可信的内部身份头。
+
+### 缓存与消息
+
+- 商品详情使用 Redis 缓存，商品写操作会处理对应缓存失效。
+- 交易库存以数据库结果为准，不把可能过期的展示缓存作为扣库存依据。
+- 消费端按业务键做幂等判断，并对失败消息采用有限重试，避免无限重试拖垮队列。
+
+### AI 客服
+
+- 使用关键词/BM25 与向量检索组合，再通过 RRF 融合结果。
+- 通过 Function Calling 查询订单状态、商品库存和售后政策。
+- 会话上下文放在 Redis，业务数据通过异步 MySQL 访问。
+- AI 服务是可选模块，不影响 Java 电商主链路启动。
+
+## 本地运行
+
+### 环境要求
+
+- JDK 17
+- Maven 3.9+（仓库提供 Maven Wrapper）
+- Node.js 18+
+- Docker Desktop 或 Docker Engine
+- Nacos Server 2.2.3（当前脚本按本地安装目录启动）
+- Python 3.12（仅启用 AI 客服时需要）
+
+### 一键启动演示环境
+
+`start-all.sh` 会启动 MySQL、Redis、RabbitMQ、Nacos，以及已经构建好的 Java 服务；前端和 AI 服务在依赖准备好后自动启动。
 
 ```bash
-# 一键启动：中间件容器 → 数据库迁移 → Nacos → 4 个微服务 → AI 客服 → 管理后台
-# 脚本逐步健康检查，缺什么会明确提示；密钥与内部令牌由脚本注入本地开发值
-bash start-all.sh
+# 1. 构建微服务 JAR
+cd shop-parent
+mvn clean package -DskipTests
+cd ..
 
-# 停止（--with-docker 连容器一起停）
+# 2. 可选：准备 Vue 前端
+cd shop-web
+npm install
+cd ..
+
+# 3. 可选：准备 AI 客服
+cd ecommerce-agent-python
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# 在 .env 中填写 LLM_API_KEY
+cd ..
+
+# 4. 启动完整演示环境
+bash start-all.sh
+```
+
+如果 Nacos 不在脚本默认目录 `/e/cscode/java/tools/nacos-2.2.3`，先设置：
+
+```bash
+export NACOS_HOME=/path/to/nacos-2.2.3
+bash start-all.sh
+```
+
+停止服务：
+
+```bash
+bash stop-all.sh
+```
+
+同时停止 Docker 中间件：
+
+```bash
 bash stop-all.sh --with-docker
 ```
 
-启动后：
+中间件定义位于 [`shop-parent/docker-compose.yml`](shop-parent/docker-compose.yml)，包括 MySQL 8、Redis 6 和 RabbitMQ Management。Nacos 当前需要单独准备，不在 Compose 中启动。
 
-| 入口 | 地址 | 账号 |
-|---|---|---|
-| 管理后台 | http://localhost:5173 | `admin / 123456`（ADMIN） |
-| 接口文档（网关） | http://localhost:8080/doc.html | — |
-| AI 客服文档 | http://localhost:8000/docs | — |
+### Windows 使用说明
 
-> 只起单体（阶段一）时端口与网关冲突，需先 `bash stop-all.sh`，
-> 并按 [src/README.md](src/README.md) 显式提供 `JWT_SECRET`。
+启动脚本是 Bash 脚本，建议使用 Git Bash 或 WSL 执行。也可以在 IDE 中直接启动 `shop-gateway`、`shop-user`、`shop-product` 和 `shop-order`。如果 Maven Wrapper 在本机环境解析失败，使用已安装的 Maven 3.9+ 或 IDE Maven 配置即可。
 
-## 质量与验证
+## 访问地址
 
-自动化验证覆盖四层，脚本都在仓库里，可复现：
+| 服务 | 地址 | 说明 |
+| --- | --- | --- |
+| Vue 前端 | <http://localhost:5173> | 管理后台/业务页面 |
+| Gateway | <http://localhost:8080> | 前端和外部 API 入口 |
+| 用户服务文档 | <http://localhost:8081/doc.html> | Knife4j |
+| 商品服务文档 | <http://localhost:8082/doc.html> | Knife4j |
+| 订单服务文档 | <http://localhost:8083/doc.html> | Knife4j |
+| Nacos 控制台 | <http://localhost:8848/nacos> | 默认账号 `nacos/nacos` |
+| RabbitMQ 控制台 | <http://localhost:15672> | 默认账号 `guest/guest` |
+| AI API 文档 | <http://localhost:8000/docs> | 可选，调试入口 |
 
-| 套件 | 脚本 | 覆盖 |
-|---|---|---|
-| 单元测试 | `mvn test` | 白名单匹配规则（含越权与路径穿越防回归）、内部令牌守卫 |
-| 微服务冒烟 | `shop-parent/scripts/smoke-test-ms.sh` | 注册→登录→地址→加购→下单→支付→发货→完成→取消→异常场景→鉴权边界→业务服务端口防护 |
-| 并发压测 | `shop-parent/scripts/concurrency-test-ms.sh` | 20 并发×库存 5 → 恰好 5 单成功、库存 0、零超卖 |
-| AI 客服全链路 | `ecommerce-agent-python/scripts/smoke_test.sh` | 健康检查→鉴权边界→会话→对话→文档上传→向量化→RAG 检索→工具调用→清理 |
-| 浏览器端到端 | `shop-web/e2e-check.js` | CDP 驱动真实浏览器跑完整下单闭环与智能客服提问 |
-| 检索链路诊断 | `ecommerce-agent-python/scripts/diag_retrieval.py` | 打印「切词 / 关键词路 / 向量路 / 融合结果」，定位召回问题 |
+本地演示账号：`admin / 123456`。生产环境请替换默认账号、JWT 密钥、内部令牌和中间件密码。
 
-最近一次全量回归（2026-09-17，真实中间件环境）全部通过：
-微服务冒烟 54 项（脚本其后扩充至 59 条断言）、AI 客服 21 项、浏览器端到端 21 项、单元测试 18 项，
-并发压测 20×5 零超卖。
+## 测试与验证
 
-## 目录结构
+### 单元测试
 
-```
-├── src/                         # 阶段一：Spring Boot 单体
-├── shop-parent/                 # 阶段二：微服务（gateway / user / product / order / common）
-├── shop-web/                    # 阶段三：Vue3 管理后台（含 e2e-check.js）
-├── ecommerce-mini-program/      # 阶段三：uni-app 小程序
-├── ecommerce-agent-python/      # 拓展：AI 智能客服（FastAPI + LangChain）
-├── sql/                         # 建表 / 种子数据 / 增量迁移
-├── scripts/                     # 冒烟与并发测试脚本
-├── start-all.sh / stop-all.sh   # 一键启停本地演示环境
-└── 本地运行指南.md               # 完整运行与排障说明
+```bash
+# 根目录单体模块
+mvn test
+
+# 微服务模块
+cd shop-parent
+mvn test
 ```
 
-## 环境变量
+当前仓库基线中，根目录测试和 `shop-parent` 测试分别覆盖 15 和 33 个测试用例；实际数量以 Maven 当前输出为准。
 
-密钥类均**无仓库默认值**，缺失即启动失败；本地由 `start-all.sh` 注入带 `change-me` 标记的开发值。
+### 需要运行服务的验证脚本
 
-| 变量 | 默认值 | 用途 |
-|---|---|---|
-| `JWT_SECRET` | **无（缺失即启动失败）** | JWT HS256 密钥，≥32 字节 |
-| `INTERNAL_TOKEN` | **无（缺失即启动失败）** | 服务间调用令牌 `X-Internal-Token` |
-| `LLM_API_KEY` | **无（AI 客服需配置）** | DeepSeek API Key，见 `ecommerce-agent-python/.env.example` |
-| `MYSQL_*` / `REDIS_*` / `RABBITMQ_*` | 本地开发值 | 中间件连接 |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,...` | 允许的前端来源（逗号分隔） |
+启动对应服务和中间件后，可按需执行：
 
-## 注意事项（本机环境）
+```bash
+# 微服务冒烟
+bash shop-parent/scripts/smoke-test-ms.sh
 
-1. **Maven 网络**：本机 Java 解析 Maven Central 偶发失败，需 `MAVEN_OPTS="-Djava.net.preferIPv4Stack=true"`
-2. **Maven Wrapper**：Git Bash 下 `./mvnw` 可能报找不到 classworlds 启动器，绕法是直连 java 调启动器
-   ```bash
-   D=~/.m2/wrapper/dists/apache-maven-3.9.9/*/; java -classpath "$D/boot/plexus-classworlds-2.8.0.jar" \
-     "-Dclassworlds.conf=$D/bin/m2.conf" "-Dmaven.home=$D" \
-     -Dmaven.multiModuleProjectDirectory="$PWD" \
-     org.codehaus.plexus.classworlds.launcher.Launcher -o -B package
-   ```
-3. **Docker 镜像**：直连 Docker Hub 不通时可换镜像源
-4. **Git Bash 传参**：向 Windows 原生程序传中文参数会被转成 GBK，curl 请求体请写入文件后 `--data @file`
-5. **curl 走代理**：访问 localhost 可能被代理拦截返回 502，加 `--noproxy '*'`
-6. **日志编码**：应用日志按平台编码（GBK）落盘，`grep` 搜中文会搜不到
-7. **种子数据编码**：`sql/data.sql` 首行 `SET NAMES utf8mb4` 不可删除，否则 initdb 中文乱码
-8. **数据库未就绪**：应用会重试后继续启动，此时依赖库的接口返回 500，请等中间件就绪
-9. **compose 执行目录**：必须在 `shop-parent/` 下执行（根目录的 `docker-compose.yml` 是本项目早期的精简版）
-10. **Nacos 端口 9848 被占用**：Windows 的保留端口段可能覆盖 `9848`（= 8848 + 1000，Nacos 的 gRPC 端口），
-    表现为 `netstat` 看不到占用却 `bind` 失败。执行 `net stop winnat && net start winnat` 重新分配保留段即可
+# 库存/订单并发验证
+bash shop-parent/scripts/concurrency-test-ms.sh
 
-## 已知边界
+# AI 客服冒烟
+bash ecommerce-agent-python/scripts/smoke_test.sh
 
-诚实标注未做的部分，避免误读：
+# Vue 页面检查
+node shop-web/e2e-check.js
+```
 
-- **AI 客服的 rerank 未实现**：当前是「BM25 + 向量 + RRF」，没有 cross-encoder 精排；
-  演示规模下 RRF 已解决"召回漏"的主要矛盾，精排收益要在更大候选集上才明显
-- **中文分词是自建 bigram**，非专业分词器（不处理同义词与多字词边界），小规模知识库够用
-- **向量库用 Redis Stack**：规模上来后应换 Milvus / pgvector
-- **密钥未接配置中心**：目前靠环境变量注入，生产建议托管到 Nacos / KMS 并支持轮换
+这些脚本用于验证当前可运行环境，不替代对极端宕机、网络分区和跨服务事务的完整生产级演练。
+
+## 关键配置
+
+开发环境可以参考各模块的 `application.yml`、`.env.example` 和 [`shop-parent/README.md`](shop-parent/README.md)。常见配置包括：
+
+| 配置 | 用途 |
+| --- | --- |
+| `JWT_SECRET` | JWT 签名密钥，生产环境必须使用高强度随机值 |
+| `INTERNAL_TOKEN` | 微服务内部调用校验 |
+| `NACOS_ADDR` | Nacos 地址，默认本地 8848 |
+| `MYSQL_*` | MySQL 连接信息 |
+| `REDIS_*` | Redis 连接信息 |
+| `RABBITMQ_*` | RabbitMQ 连接信息 |
+| `LLM_API_KEY` | AI 客服调用模型所需密钥 |
+
+`start-all.sh` 会为本地演示注入开发用 JWT 密钥和内部令牌；不要把这些值用于生产环境，也不要把真实密钥提交到 Git。
+
+## 项目边界
+
+这是求职展示项目，明确不覆盖以下生产级能力：
+
+- 不承诺远程库存调用在“远端已提交但响应丢失、随后本地 JVM 崩溃”等极端窗口下的 Exactly Once。
+- 没有引入 Outbox、Saga、Seata 或完整分布式事务日志；当前通过条件更新、幂等、补偿和重试覆盖常见失败场景。
+- 不包含跨机房容灾、Kubernetes、完整监控平台和大规模压测体系。
+- 微信登录、支付和部分售后流程以演示为主。
+- AI 检索没有引入交叉编码器重排，中文分词和向量库配置也以小规模演示为目标。
+
+这些限制是有意保留的，便于在面试中清楚说明“已经解决的问题”和“如果继续生产化需要补充的架构”。
+
+## 相关文档
+
+- [微服务运行与设计说明](shop-parent/README.md)
+- [AI 客服说明](ecommerce-agent-python/README.md)
+- [微信小程序说明](ecommerce-mini-program/README.md)
+- [本地运行指南](本地运行指南.md)
+- [工程记录：功能与安全修复](工程记录_功能与安全修复.md)
+- [工程记录：审计与修复总览](工程记录_审计与修复总览.md)
+- [简历项目表述](简历_修订版.md)
+
+## License
+
+仅用于学习、求职展示和技术交流。
