@@ -7,6 +7,7 @@ import com.ecommerce.common.entity.UserAddress;
 import com.ecommerce.common.exception.BusinessException;
 import com.ecommerce.common.result.ResultCode;
 import com.ecommerce.mapper.UserAddressMapper;
+import com.ecommerce.mapper.UserMapper;
 import com.ecommerce.service.AddressService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,9 +22,11 @@ import java.util.Objects;
 public class AddressServiceImpl implements AddressService {
 
     private final UserAddressMapper userAddressMapper;
+    private final UserMapper userMapper;
 
-    public AddressServiceImpl(UserAddressMapper userAddressMapper) {
+    public AddressServiceImpl(UserAddressMapper userAddressMapper, UserMapper userMapper) {
         this.userAddressMapper = userAddressMapper;
+        this.userMapper = userMapper;
     }
 
     @Override
@@ -37,6 +40,7 @@ public class AddressServiceImpl implements AddressService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long add(Long userId, AddressDTO addressDTO) {
+        lockUser(userId);
         boolean isFirst = userAddressMapper.selectCount(new LambdaQueryWrapper<UserAddress>()
                 .eq(UserAddress::getUserId, userId)) == 0;
         boolean asDefault = isFirst || Integer.valueOf(1).equals(addressDTO.getIsDefault());
@@ -57,6 +61,7 @@ public class AddressServiceImpl implements AddressService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void update(Long userId, Long id, AddressDTO addressDTO) {
+        lockUser(userId);
         UserAddress address = getOwned(userId, id);
         if (Integer.valueOf(1).equals(addressDTO.getIsDefault()) && address.getIsDefault() != 1) {
             cancelAllDefault(userId);
@@ -71,6 +76,7 @@ public class AddressServiceImpl implements AddressService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long userId, Long id) {
+        lockUser(userId);
         UserAddress address = getOwned(userId, id);
         userAddressMapper.deleteById(id);
         // 若删除的是默认地址，将剩余第一条设为默认
@@ -89,6 +95,7 @@ public class AddressServiceImpl implements AddressService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void setDefault(Long userId, Long id) {
+        lockUser(userId);
         getOwned(userId, id);
         // 先取消该用户原有默认地址，再设置新默认，保证唯一默认
         cancelAllDefault(userId);
@@ -105,6 +112,13 @@ public class AddressServiceImpl implements AddressService {
             throw new BusinessException(ResultCode.ADDRESS_NOT_FOUND);
         }
         return address;
+    }
+
+    /** 在首次读取地址前锁定用户行，同一用户的地址变更串行至事务提交。 */
+    private void lockUser(Long userId) {
+        if (userMapper.lockById(userId) == null) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED);
+        }
     }
 
     private void cancelAllDefault(Long userId) {

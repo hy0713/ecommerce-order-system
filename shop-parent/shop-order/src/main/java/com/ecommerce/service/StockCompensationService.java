@@ -9,6 +9,9 @@ import com.ecommerce.common.result.Result;
 import com.ecommerce.mapper.StockCompensationMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 
@@ -30,13 +33,17 @@ public class StockCompensationService {
     private final StockCompensationMapper compensationMapper;
     private final ProductFeignClient productFeignClient;
     private final StockCompensationRecorder compensationRecorder;
+    private final TransactionTemplate retryTransaction;
 
     public StockCompensationService(StockCompensationMapper compensationMapper,
                                     ProductFeignClient productFeignClient,
-                                    StockCompensationRecorder compensationRecorder) {
+                                    StockCompensationRecorder compensationRecorder,
+                                    PlatformTransactionManager transactionManager) {
         this.compensationMapper = compensationMapper;
         this.productFeignClient = productFeignClient;
         this.compensationRecorder = compensationRecorder;
+        this.retryTransaction = new TransactionTemplate(transactionManager);
+        this.retryTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /**
@@ -87,22 +94,40 @@ public class StockCompensationService {
         int success = 0;
         for (StockCompensation task : pending) {
             try {
-                StockRestoreDTO dto = new StockRestoreDTO();
-                dto.setProductId(task.getProductId());
-                dto.setQuantity(task.getQuantity());
-                Result<Void> result = productFeignClient.restoreStock(dto);
-                if (result != null && result.isSuccess()) {
-                    markDone(task);
+                // 查询列表不是执行权：在独立事务内当前读，并锁住该行直到状态提交。
+                Boolean restored = retryTransaction.execute(status -> {
+                    StockCompensation locked = compensationMapper.selectPendingForUpdate(task.getId(), task.getRetryCount());
+                    return locked != null && retryLocked(locked);
+                });
+                if (Boolean.TRUE.equals(restored)) {
                     success++;
-                } else {
-                    markRetry(task, result == null ? "服务无响应" : result.getMessage());
                 }
             } catch (Exception e) {
-                markRetry(task, e.getClass().getSimpleName() + ": " + e.getMessage());
+                // 数据库异常回滚本条事务并释放行锁；不在锁外修改任务，下一轮仍可处理。
+                log.error("库存补偿事务失败：id={}", task.getId(), e);
             }
         }
         log.info("库存补偿重试完成：本轮 {} 条，成功 {} 条", pending.size(), success);
         return success;
+    }
+
+    private boolean retryLocked(StockCompensation task) {
+        StockRestoreDTO dto = new StockRestoreDTO();
+        dto.setProductId(task.getProductId());
+        dto.setQuantity(task.getQuantity());
+        Result<Void> result;
+        try {
+            result = productFeignClient.restoreStock(dto);
+        } catch (Exception e) {
+            markRetry(task, e.getClass().getSimpleName() + ": " + e.getMessage());
+            return false;
+        }
+        if (result == null || !result.isSuccess()) {
+            markRetry(task, result == null ? "服务无响应" : result.getMessage());
+            return false;
+        }
+        markDone(task);
+        return true;
     }
 
     private void markDone(StockCompensation task) {
@@ -113,15 +138,20 @@ public class StockCompensationService {
                 .set(StockCompensation::getLastError, null));
         if (rows > 0) {
             log.info("库存补偿重试成功：orderNo={}, productId={}", task.getOrderNo(), task.getProductId());
+        } else {
+            throw new IllegalStateException("库存补偿完成状态未更新：" + task.getId());
         }
     }
 
     private void markRetry(StockCompensation task, String error) {
-        compensationMapper.update(null, new LambdaUpdateWrapper<StockCompensation>()
+        int rows = compensationMapper.update(null, new LambdaUpdateWrapper<StockCompensation>()
                 .eq(StockCompensation::getId, task.getId())
                 .eq(StockCompensation::getStatus, StockCompensation.STATUS_PENDING)
                 .set(StockCompensation::getRetryCount, task.getRetryCount() + 1)
                 .set(StockCompensation::getLastError, truncate(error)));
+        if (rows == 0) {
+            throw new IllegalStateException("库存补偿重试次数未更新：" + task.getId());
+        }
         log.warn("库存补偿重试失败：orderNo={}, productId={}, retryCount={}, error={}",
                 task.getOrderNo(), task.getProductId(), task.getRetryCount() + 1, error);
     }

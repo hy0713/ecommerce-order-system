@@ -116,6 +116,7 @@ public class OrderServiceImpl implements OrderService {
         // 3. 逐个 Feign 扣减库存（商品服务内 Redisson 锁 + 行锁/乐观锁），失败触发补偿
         List<OrderItemSnapshot> snapshots = new ArrayList<>();
         BigDecimal totalAmount = BigDecimal.ZERO;
+        OrderMaster orderMaster = new OrderMaster();
         try {
             for (ShoppingCart item : selectedItems) {
                 StockDeductResult deduct = deductStock(item);
@@ -123,44 +124,43 @@ public class OrderServiceImpl implements OrderService {
                         deduct.getPrice(), item.getQuantity()));
                 totalAmount = totalAmount.add(deduct.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
             }
+
+            // 4. 生成订单：保存商品快照
+            orderMaster.setOrderNo(orderNo);
+            orderMaster.setUserId(userId);
+            orderMaster.setTotalAmount(totalAmount);
+            orderMaster.setOrderStatus(OrderStatusEnum.WAIT_PAY.getCode());
+            orderMaster.setReceiverName(address.getReceiverName());
+            orderMaster.setReceiverPhone(address.getReceiverPhone());
+            orderMaster.setReceiverAddress(address.getAddress());
+            orderMasterMapper.insert(orderMaster);
+
+            for (OrderItemSnapshot snapshot : snapshots) {
+                OrderDetail detail = new OrderDetail();
+                detail.setOrderNo(orderNo);
+                detail.setProductId(snapshot.getProductId());
+                detail.setProductName(snapshot.getProductName());
+                detail.setProductPrice(snapshot.getProductPrice());
+                detail.setProductQuantity(snapshot.getQuantity());
+                orderDetailMapper.insert(detail);
+            }
+
+            // 清空购物车中已结算的选中商品（限定 user_id，避免越权删除他人购物车）
+            List<Long> cartItemIds = selectedItems.stream().map(ShoppingCart::getId).collect(Collectors.toList());
+            cartMapper.delete(new LambdaQueryWrapper<ShoppingCart>()
+                    .eq(ShoppingCart::getUserId, userId)
+                    .in(ShoppingCart::getId, cartItemIds));
+
+            // 6. 事务提交后发送延迟消息：订单超时自动取消
+            runAfterCommit(() -> sendDelayCancelMessage(orderNo));
+
+            log.info("订单创建成功：orderNo={}, userId={}, totalAmount={}", orderNo, userId, totalAmount);
+            return toOrderVO(orderMaster, null);
         } catch (Exception e) {
-            // 5. 补偿：回补已扣减的商品库存；回补失败的登记补偿流水（独立事务，不会被本事务回滚）
+            // 方法内提交前操作失败：回补已扣商品，重新抛出异常以回滚本地事务
             compensateOnCreateFail(orderNo, snapshots);
             throw e;
         }
-
-        // 4. 生成订单：保存商品快照
-        OrderMaster orderMaster = new OrderMaster();
-        orderMaster.setOrderNo(orderNo);
-        orderMaster.setUserId(userId);
-        orderMaster.setTotalAmount(totalAmount);
-        orderMaster.setOrderStatus(OrderStatusEnum.WAIT_PAY.getCode());
-        orderMaster.setReceiverName(address.getReceiverName());
-        orderMaster.setReceiverPhone(address.getReceiverPhone());
-        orderMaster.setReceiverAddress(address.getAddress());
-        orderMasterMapper.insert(orderMaster);
-
-        for (OrderItemSnapshot snapshot : snapshots) {
-            OrderDetail detail = new OrderDetail();
-            detail.setOrderNo(orderNo);
-            detail.setProductId(snapshot.getProductId());
-            detail.setProductName(snapshot.getProductName());
-            detail.setProductPrice(snapshot.getProductPrice());
-            detail.setProductQuantity(snapshot.getQuantity());
-            orderDetailMapper.insert(detail);
-        }
-
-        // 清空购物车中已结算的选中商品（限定 user_id，避免越权删除他人购物车）
-        List<Long> cartItemIds = selectedItems.stream().map(ShoppingCart::getId).collect(Collectors.toList());
-        cartMapper.delete(new LambdaQueryWrapper<ShoppingCart>()
-                .eq(ShoppingCart::getUserId, userId)
-                .in(ShoppingCart::getId, cartItemIds));
-
-        // 6. 事务提交后发送延迟消息：订单超时自动取消
-        runAfterCommit(() -> sendDelayCancelMessage(orderNo));
-
-        log.info("订单创建成功：orderNo={}, userId={}, totalAmount={}", orderNo, userId, totalAmount);
-        return toOrderVO(orderMaster, null);
     }
 
     @Override
